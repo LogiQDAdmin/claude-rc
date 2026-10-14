@@ -1,427 +1,87 @@
-import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react'
-import {api, LABEL, timeAgo, type AppState, type Event, type FolderRoot, type Project, type State} from './api'
+import {useCallback, useEffect, useRef, useState} from 'react'
+import {api, messageOf, parseSnapshot, providerEvents, PROVIDERS, PROVIDER_LABEL, type AppState, type Project, type Provider} from './api'
+import {ProviderCard, type Action, type Scope} from './ProviderCard'
+import {AddDialog, conversationsOf, ProjectRow, type TerminalTarget} from './Projects'
 import {TerminalPane} from './Terminal'
-
-type Tab = 'proyectos' | 'terminal' | 'registro' | 'cuenta'
-
-const Pill = ({s}: {s: State}) => <span className={`pill s-${s}`}>{LABEL[s]}</span>
+type Tab = 'proyectos' | 'terminal' | 'registro'
 
 export function App() {
-  const [st, setSt] = useState<AppState | null>(null)
-  const [err, setErr] = useState('')
-  const [tab, setTab] = useState<Tab>('proyectos')
-  const [termWin, setTermWin] = useState('cuenta')
-  const [toast, setToast] = useState('')
-  const [adding, setAdding] = useState(false)
-  const toastTimer = useRef<number>()
-
+  const [state,setState] = useState<AppState|null>(null)
+  const lastState = useRef<AppState|null>(null)
+  const [connectionError,setConnectionError] = useState('')
+  const [actionErrors,setActionErrors] = useState<Partial<Record<Scope,string>>>({})
+  const [busy,setBusy] = useState<Partial<Record<Scope,string>>>({})
+  const [tab,setTab] = useState<Tab>('proyectos')
+  const [terminal,setTerminal] = useState<TerminalTarget|null>(null)
+  const [adding,setAdding] = useState(false)
+  const [notice,setNotice] = useState('')
+  const [lastSeen,setLastSeen] = useState<Date|null>(null)
+  const [eventFilter,setEventFilter] = useState<'all'|Provider>('all')
+  const fetching = useRef(false)
+  const noticeTimer = useRef<number>()
   const refresh = useCallback(async () => {
+    if (fetching.current) return
+    fetching.current = true
     try {
-      setSt(await api('state'))
-      setErr('')
-    } catch (e: any) {
-      setErr(e.message)
-    }
-  }, [])
-
+      const next = parseSnapshot(await api('state'),lastState.current)
+      lastState.current=next;setState(next);setConnectionError('');setLastSeen(new Date())
+    } catch (error) {setConnectionError(messageOf(error))} finally {fetching.current=false}
+  },[])
   useEffect(() => {
-    refresh()
-    const t = window.setInterval(refresh, 2000)
-    return () => window.clearInterval(t)
-  }, [refresh])
-
-  const say = (msg: string) => {
-    setToast(msg)
-    window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setToast(''), 2600)
-  }
-
-  const act = async (fn: () => Promise<unknown>, ok?: string) => {
+    void refresh()
+    const timer=window.setInterval(() => void refresh(),2500)
+    return () => {window.clearInterval(timer);window.clearTimeout(noticeTimer.current)}
+  },[refresh])
+  const act:Action = async (scope,key,work,success) => {
+    setBusy(current => ({...current,[scope]:key}));setActionErrors(current => ({...current,[scope]:''}))
     try {
-      const r = await fn()
-      if (r && typeof r === 'object' && 'projects' in (r as any)) setSt(r as AppState)
-      if (ok) say(ok)
-    } catch (e: any) {
-      say(e.message)
-    }
+      await work();await refresh()
+      if(success){setNotice(success);window.clearTimeout(noticeTimer.current);noticeTimer.current=window.setTimeout(() => setNotice(''),4000)}
+      return true
+    } catch(error){setActionErrors(current => ({...current,[scope]:messageOf(error)}));return false}
+    finally {setBusy(current => ({...current,[scope]:''}))}
   }
-
-  const openTerminal = (win: string) => {
-    setTermWin(win)
-    setTab('terminal')
-  }
-
-  if (!st) {
-    return <div className="wrap"><p className="hint">{err ? `No se puede hablar con el gestor: ${err}` : 'Cargando…'}</p></div>
-  }
-
-  const convs = st.projects.flatMap((p) => p.conversations.map((c) => ({...c, project: p.name})))
-  const orphans = convs.filter((c) => c.state === 'atencion' || c.state === 'recuperando')
-  const attention = st.projects.filter((p) => p.state === 'atencion').length + orphans.length
-
-  return (
-    <div className="wrap">
-      <header className="app">
-        <div className="brand">
-          <img src="./icon.svg" alt="" />
-          <div>
-            <h1>Remote Control</h1>
-            <p>Claude Code en este servidor, desde el móvil</p>
+  const openTerminal = (project:Project,provider:Provider) => void act(provider,`terminal-${project.id}`,async () => {
+    const result=await api<{window:string;provider:Provider}>(`projects/${project.id}/providers/${provider}/terminal`,{method:'POST'})
+    if(!result || typeof result.window !== 'string' || result.provider !== provider) throw new Error('La terminal devolvió una respuesta que no se reconoce. Revisa el registro.')
+    setTerminal({window:result.window,provider,name:project.name});setTab('terminal')
+  })
+  const openAccountTerminal = () => void act('claude','terminal-account',async () => {
+    const result=await api<{window:string;provider:Provider}>('providers/claude/terminal',{method:'POST',body:{}})
+    if(!result || typeof result.window !== 'string' || result.provider !== 'claude') throw new Error('La terminal de la cuenta de Claude devolvió una respuesta que no se reconoce. Revisa el registro.')
+    setTerminal({window:result.window,provider:'claude',name:'Cuenta de Claude',account:true});setTab('terminal')
+  })
+  const events=state ? PROVIDERS.flatMap(provider => providerEvents(state.providers[provider])).filter(event => eventFilter==='all' || event.provider===eventFilter).sort((a,b) => b.at.localeCompare(a.at)) : []
+  const recovery=state?.unifiedProjects.flatMap(project => project.bindings.filter(binding => binding.provider==='claude').flatMap(binding => conversationsOf(state,binding).filter(conversation => conversation.state==='atencion' || conversation.state==='recuperando').map(conversation => ({...conversation,project})))) ?? []
+  const claude=state?.providers.claude
+  const catalogBlocked=!!busy.catalog || !!state?.catalogError
+  return <div className="app-wrap">
+    <header className="app-header"><div className="brand"><img src="./icon.svg" alt="" /><div><h1>Remote Control</h1><p>Claude Code y Codex en tu servidor.</p></div></div><div className="version">Una app, dos agentes<span>{state ? `Versión ${state.version}` : 'Conectando…'}</span></div></header>
+    {connectionError && <section className="notice error" role="alert"><h2>{connectionError.includes('formato') ? 'El panel no reconoce la respuesta del servidor' : 'Se ha perdido la conexión con el panel'}</h2><p>{connectionError}</p><p>{lastSeen ? `Último estado: ${lastSeen.toLocaleTimeString('es-ES')}. Los datos pueden estar desactualizados.` : 'Aún no se ha recibido un estado válido.'}</p><button className="btn" onClick={() => void refresh()}>Comprobar conexión</button></section>}
+    {state?.unknownProviders.length ? <section className="notice" role="alert"><h2>Agente no reconocido</h2><p>El servidor ha incluido {state.unknownProviders.join(', ')}. Este panel conserva los controles de Claude y Codex; revisa la compatibilidad de la app.</p></section> : null}
+    <div className="providers-overview">{PROVIDERS.map(provider => <ProviderCard key={provider} provider={provider} state={state?.providers[provider] ?? null} schemaError={state?.providerErrors[provider]} actionError={actionErrors[provider]} busy={busy[provider]} act={act} onLog={() => {setEventFilter(provider);setTab('registro')}} onAccountTerminal={openAccountTerminal} />)}</div>
+    {!state ? <section className="loading" aria-live="polite"><h2>{connectionError ? 'Esperando conexión' : 'Cargando proyectos…'}</h2><p>El panel está disponible aunque no hayas conectado ninguna cuenta.</p></section> : <>
+      {state.catalogError && <section className="notice error" role="alert"><h2>Catálogo de proyectos sin actualizar</h2><p>{state.catalogError}</p></section>}
+      {actionErrors.catalog && <section className="notice error" role="alert"><h2>El proyecto no pudo modificarse</h2><p>{actionErrors.catalog}</p><button className="btn small" onClick={() => setActionErrors(current => ({...current,catalog:''}))}>Cerrar aviso</button></section>}
+      {recovery.length>0 && <section className="notice recovery-notice" aria-live="polite"><h2>Claude tiene {recovery.length} {recovery.length===1 ? 'conversación pendiente' : 'conversaciones pendientes'} de recuperación</h2><p>{claude?.details?.crash ? `Apagado inesperado registrado el ${new Date(claude.details.crash.at).toLocaleString('es-ES',{dateStyle:'short',timeStyle:'short'})}. ` : ''}Las conversaciones pendientes no responderán desde el móvil hasta recuperarse.{claude?.details?.autoRescue && claude.account.loggedIn ? ' Se están recuperando automáticamente.' : ''}</p><ul>{recovery.map(conversation => <li key={conversation.remoteId}>{conversation.title || conversation.remoteId} <span className="hint">({conversation.project.name})</span></li>)}</ul><button className="btn" disabled={!!busy.claude || !claude?.account.loggedIn || !!state.providerErrors.claude || recovery.every(c => c.state==='recuperando')} onClick={() => void act('claude','rescue-all',async () => {
+        for(const project of state.unifiedProjects){const remoteIds=recovery.filter(c => c.project.id===project.id && c.state==='atencion').map(c => c.remoteId);if(remoteIds.length) await api(`projects/${project.id}/providers/claude/rescue`,{method:'POST',body:{remoteIds}})}
+      },'Recuperación de conversaciones solicitada')}>Recuperar conversaciones de Claude</button></section>}
+      <main><nav className="tabs" aria-label="Secciones del panel">{(['proyectos','terminal','registro'] as Tab[]).map(value => <button key={value} className="tab" aria-current={tab===value ? 'page' : undefined} onClick={() => setTab(value)}>{value==='proyectos' ? 'Proyectos' : value==='terminal' ? 'Terminales' : 'Registro'}{value==='proyectos' && <span className="count">{state.unifiedProjects.length}</span>}</button>)}</nav>
+        {tab==='proyectos' && <section className="projects-section" aria-labelledby="projects-title"><div className="toolbar"><div><h2 id="projects-title">Carpetas de trabajo</h2><p className="hint">Elige qué agente trabaja en cada carpeta.</p></div><button className="btn primary" disabled={catalogBlocked} onClick={() => setAdding(true)}>Añadir proyecto</button></div>{state.unifiedProjects.length ? <div className="unified-projects">{state.unifiedProjects.map(project => <ProjectRow key={project.id} project={project} state={state} busy={busy} act={act} openTerminal={openTerminal} />)}</div> : <div className="empty-projects"><h3>Prepara tu primer proyecto</h3><p>Añade una carpeta existente o crea una nueva. Puedes asignarla a Claude, a Codex o a ambos.</p><button className="btn" disabled={catalogBlocked} onClick={() => setAdding(true)}>Elegir carpeta y agentes</button></div>}</section>}
+        {tab==='terminal' && <section className="terminal-section" aria-labelledby="terminal-title">
+          <div className="toolbar"><div><h2 id="terminal-title">{terminal ? terminal.account ? 'Terminal de la cuenta de Claude' : `${terminal.name} / ${PROVIDER_LABEL[terminal.provider]}` : 'Terminal de proyecto o cuenta'}</h2><p className="hint">{terminal?.account ? 'Consola de la cuenta de Claude en este servidor, independiente de los proyectos.' : 'Cada terminal pertenece a su agente y se abre dentro de la carpeta elegida.'}</p></div>
+            <label className="terminal-select">Terminal<select value={terminal ? terminal.account ? '@account:claude' : `${terminal.name}:${terminal.provider}` : ''} onChange={event => {
+              if(event.target.value==='@account:claude'){openAccountTerminal();return}
+              const option=state.unifiedProjects.flatMap(project => project.bindings.map(binding => ({project,provider:binding.provider,value:`${project.name}:${binding.provider}`}))).find(option => option.value===event.target.value)
+              if(option) openTerminal(option.project,option.provider)
+            }}><option value="" disabled>Elegir terminal</option><option value="@account:claude" disabled={!!busy.claude || !!state.providerErrors.claude || state.providers.claude?.worker?.state!=='ready'}>Cuenta de Claude</option>{state.unifiedProjects.flatMap(project => project.bindings.map(binding => <option key={`${project.id}:${binding.provider}`} value={`${project.name}:${binding.provider}`} disabled={!!busy[binding.provider] || !!state.providerErrors[binding.provider] || !binding.trust}>{project.name} / {PROVIDER_LABEL[binding.provider]}</option>))}</select></label>
           </div>
-        </div>
-        <div className="chip">
-          <span className={`dot ${st.account.loggedIn ? '' : 'off'}`} aria-hidden="true" />
-          <span>{st.account.loggedIn ? `${st.account.email ?? 'Cuenta conectada'}${st.account.plan ? ` · ${st.account.plan}` : ''}` : 'Sin sesión de Claude'}</span>
-          <button className="btn small ghost" onClick={() => setTab('cuenta')}>Cuenta</button>
-        </div>
-      </header>
-
-      {err && <div className="notice bad"><p>Se ha perdido la conexión con el gestor ({err}). Reintentando…</p></div>}
-
-      {!st.account.loggedIn && (
-        <section className="notice warn">
-          <h2>Conecta tu cuenta de Claude</h2>
-          <p>Remote Control necesita el inicio de sesión de claude.ai (Pro, Max, Team o Enterprise). Mientras tanto los proyectos esperan.</p>
-          <div className="actions"><button className="btn warn" onClick={() => setTab('cuenta')}>Iniciar sesión</button></div>
-        </section>
-      )}
-
-      {orphans.length > 0 && (
-        <section className="notice warn" aria-live="polite">
-          <h2>⚠ Apagado inesperado{st.crash ? ` (${new Date(st.crash.at).toLocaleString('es-ES', {dateStyle: 'short', timeStyle: 'short'})})` : ''}</h2>
-          <p>
-            El servidor se cortó sin cerrar bien. Estas conversaciones estaban abiertas y no responden desde el móvil hasta rescatarlas.
-            {st.autoRescue && st.account.loggedIn ? ' Se están rescatando automáticamente.' : ''}
-          </p>
-          <div className="rows">
-            {orphans.map((c) => (
-              <div className="row" key={c.remoteId}>
-                <span><b>{c.title || c.remoteId}</b> · {c.project}{c.rescueError ? ` · ${c.rescueError}` : ''}</span>
-                <Pill s={c.state} />
-              </div>
-            ))}
-          </div>
-          <div className="actions">
-            <button className="btn warn" disabled={!st.account.loggedIn || orphans.every((c) => c.state === 'recuperando')}
-              onClick={() => act(async () => { for (const c of orphans) await api(`conversations/${c.remoteId}/rescue`, {method: 'POST'}) }, 'Rescate en marcha')}>
-              Rescatar {orphans.length === 1 ? 'la conversación' : `las ${orphans.length}`}
-            </button>
-          </div>
-        </section>
-      )}
-
-      <nav className="tabs" role="tablist">
-        {(['proyectos', 'terminal', 'registro', 'cuenta'] as Tab[]).map((t) => (
-          <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
-            {{proyectos: 'Proyectos', terminal: 'Terminal', registro: 'Registro', cuenta: 'Cuenta'}[t]}
-            {t === 'proyectos' && <span className="count">{st.projects.length}</span>}
-          </button>
-        ))}
-      </nav>
-
-      {tab === 'proyectos' && (
-        <section style={{display: 'flex', flexDirection: 'column', gap: 14}}>
-          <div className="toolbar">
-            <div className="summary">
-              <span><b>{st.projects.filter((p) => p.desired === 'running').length}</b> de {st.projects.length} proyectos en marcha</span>
-              <span><b>{convs.filter((c) => c.state !== 'reposo').length}</b> conversaciones activas · {convs.length} en total</span>
-              {attention > 0 && <span className="bad"><b>{attention}</b> requieren atención</span>}
-            </div>
-            <button className="btn primary" onClick={() => setAdding(true)}>+ Añadir proyecto</button>
-          </div>
-          {st.projects.length === 0 ? (
-            <div className="panel">
-              <h2>Todavía no hay proyectos</h2>
-              <p className="hint">Un proyecto es una carpeta donde Claude Code trabaja. Cada uno aparece en el móvil y en claude.ai/code como «{st.namePrefix}-nombre», y desde ahí abres conversaciones nuevas.</p>
-              <div><button className="btn primary" onClick={() => setAdding(true)}>Añadir el primero</button></div>
-            </div>
-          ) : (
-            <div className="projects">
-              {st.projects.map((p) => <ProjectCard key={p.name} p={p} act={act} openTerminal={openTerminal} />)}
-            </div>
-          )}
-        </section>
-      )}
-
-      {tab === 'terminal' && (
-        <section style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-          <div className="term-box">
-            <div className="term-bar">
-              {['cuenta', ...st.projects.map((p) => `p-${p.name}`)].map((w) => (
-                <button key={w} aria-pressed={termWin === w} onClick={() => setTermWin(w)}>{w === 'cuenta' ? 'cuenta' : w.slice(2)}</button>
-              ))}
-            </div>
-            <TerminalPane key={termWin} window={termWin} />
-          </div>
-          <p className="hint">Es la consola real de cada servidor. Para pegar usa Ctrl+Shift+V o el clic derecho. Si sales de un servidor con Ctrl+C, el gestor lo vuelve a arrancar salvo que lo pares desde Proyectos.</p>
-        </section>
-      )}
-
-      {tab === 'registro' && <EventsView />}
-      {tab === 'cuenta' && <AccountView st={st} act={act} refresh={refresh} />}
-
-      {adding && <AddDialog onClose={() => setAdding(false)} onDone={(s) => { setSt(s); setAdding(false); say('Proyecto añadido') }} />}
-      {toast && <div className="toast" role="status">{toast}</div>}
-    </div>
-  )
-}
-
-function ProjectCard({p, act, openTerminal}: {p: Project; act: (fn: () => Promise<unknown>, ok?: string) => void; openTerminal: (w: string) => void}) {
-  const running = p.desired === 'running'
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const showDetail = ['atencion', 'iniciando', 'recuperando', 'detenida'].includes(p.state) && p.detail && !p.prompt
-  return (
-    <article className="proj">
-      <div className="proj-head">
-        <div style={{minWidth: 0}}>
-          <div className="proj-title"><h3>{p.name}</h3><Pill s={p.state} /></div>
-          <div className="path">{p.dir}</div>
-          <div className="meta">
-            <span>En el móvil: <b>{p.remoteName}</b></span>
-            <span>En uso <b>{p.capacity ? `${p.capacity.used}/${p.capacity.max}` : '—'}</b></span>
-            <span className="hide-sm">Modo <b>{p.spawn}</b></span>
-            <label className="inline">
-              <input type="checkbox" className="switch" checked={p.autostart}
-                onChange={(e) => act(() => api(`projects/${p.name}`, {method: 'PATCH', body: {autostart: e.target.checked}}),
-                  e.target.checked ? 'Arrancará al encender' : 'No arrancará al encender')} />
-              Al encender
-            </label>
-          </div>
-          {showDetail && <div className="detail">{p.detail}</div>}
-        </div>
-        <div className="proj-actions">
-          {running
-            ? <button className="btn" onClick={() => act(() => api(`projects/${p.name}/stop`, {method: 'POST'}), `${p.name} parado`)}>Parar</button>
-            : <button className="btn primary" onClick={() => act(() => api(`projects/${p.name}/start`, {method: 'POST'}), `${p.name} arrancando`)}>Arrancar</button>}
-          <a className="btn" href="https://claude.ai/code" target="_blank" rel="noopener">Abrir en Claude ↗</a>
-          <button className="btn ghost" onClick={() => openTerminal(`p-${p.name}`)}>Terminal</button>
-          {confirmDelete
-            ? <>
-                <button className="btn danger" onClick={() => act(() => api(`projects/${p.name}`, {method: 'DELETE'}), `${p.name} quitado del panel`)}>Quitar (la carpeta se queda)</button>
-                <button className="btn ghost" onClick={() => setConfirmDelete(false)}>Cancelar</button>
-              </>
-            : <button className="btn ghost" onClick={() => setConfirmDelete(true)} aria-label={`Quitar ${p.name}`}>Quitar</button>}
-        </div>
-      </div>
-      {p.prompt && (
-        <div className="prompt">
-          <span>Claude Code pregunta: <code>{p.prompt}</code></span>
-          <span style={{display: 'flex', gap: 6}}>
-            <button className="btn small primary" onClick={() => act(() => api(`projects/${p.name}/answer`, {method: 'POST', body: {yes: true}}), 'Respondido: sí')}>Sí</button>
-            <button className="btn small" onClick={() => act(() => api(`projects/${p.name}/answer`, {method: 'POST', body: {yes: false}}), 'Respondido: no')}>No</button>
-          </span>
-        </div>
-      )}
-      <details className="convs" open={p.conversations.some((c) => c.state !== 'reposo')}>
-        <summary><span className="chev">▸</span> Conversaciones ({p.conversations.length})</summary>
-        {p.conversations.length === 0 ? (
-          <p className="empty">Sin conversaciones todavía. Ábrelas desde el móvil o claude.ai/code en «{p.remoteName}».</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Conversación</th><th>Estado</th><th className="hide-sm">ID remoto</th><th>Actividad</th><th /></tr></thead>
-              <tbody>
-                {p.conversations.map((c) => (
-                  <tr key={c.remoteId}>
-                    <td>{c.title || <span style={{color: 'var(--muted)'}}>Sin mensajes</span>}{c.rescueError && <span className="err">{c.rescueError}</span>}</td>
-                    <td><Pill s={c.state} /></td>
-                    <td className="id hide-sm">{c.remoteId.slice(0, 20)}…</td>
-                    <td className="when">{timeAgo(c.lastActivity)}</td>
-                    <td className="act">
-                      {c.state === 'atencion'
-                        ? <button className="btn small warn" onClick={() => act(() => api(`conversations/${c.remoteId}/rescue`, {method: 'POST'}), 'Rescate en marcha')}>Rescatar</button>
-                        : <a className="btn small ghost" href={c.url} target="_blank" rel="noopener">Abrir ↗</a>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </details>
-    </article>
-  )
-}
-
-function AddDialog({onClose, onDone}: {onClose: () => void; onDone: (s: AppState) => void}) {
-  const ref = useRef<HTMLDialogElement>(null)
-  const [roots, setRoots] = useState<FolderRoot[]>([])
-  const [dir, setDir] = useState('')
-  const [newName, setNewName] = useState('')
-  const [name, setName] = useState('')
-  const [spawn, setSpawn] = useState<'same-dir' | 'worktree'>('same-dir')
-  const [autostart, setAutostart] = useState(true)
-  const [trust, setTrust] = useState(true)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    ref.current?.showModal()
-    api<FolderRoot[]>('folders').then((r) => {
-      setRoots(r)
-      const first = r.flatMap((x) => x.folders).find((f) => !f.used)
-      if (first) { setDir(first.path); setName(first.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 31)) }
-      else { const root = r.find((x) => x.mounted)?.root ?? r[0]?.root; if (root) setDir(`new:${root}`) }
-    }).catch((e) => setError(e.message))
-  }, [])
-
-  const isNew = dir.startsWith('new:')
-  const chosen = roots.flatMap((r) => r.folders).find((f) => f.path === dir)
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    setBusy(true)
-    setError('')
-    try {
-      const target = isNew ? `${dir.slice(4)}/${newName.trim()}` : dir
-      onDone(await api('projects', {method: 'POST', body: {name, dir: target, create: isNew, spawn, autostart, trust}}))
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <dialog ref={ref} onClose={onClose} onCancel={onClose}>
-      <form onSubmit={submit}>
-        <h2>Añadir proyecto</h2>
-        <label className="field">Carpeta
-          <select value={dir} onChange={(e) => {
-            setDir(e.target.value)
-            const f = roots.flatMap((r) => r.folders).find((x) => x.path === e.target.value)
-            if (f) setName(f.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 31))
-          }}>
-            {roots.map((r) => (
-              <optgroup key={r.root} label={r.mounted ? r.root : `${r.root} (no montada)`}>
-                {r.folders.map((f) => <option key={f.path} value={f.path} disabled={f.used}>{f.name}{f.git ? ' · git' : ''}{f.used ? ' (ya es un proyecto)' : ''}</option>)}
-                {r.mounted && <option value={`new:${r.root}`}>+ Carpeta nueva en {r.root}</option>}
-              </optgroup>
-            ))}
-          </select>
-          <small>Sólo las carpetas que la app tiene autorizadas. En Umbrel se eligen en los ajustes de la app.</small>
-        </label>
-        {isNew && (
-          <label className="field">Nombre de la carpeta nueva
-            <input type="text" required value={newName} pattern="[A-Za-z0-9._-]+" onChange={(e) => { setNewName(e.target.value); setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 31)) }} />
-          </label>
-        )}
-        <label className="field">Nombre del proyecto
-          <input type="text" required value={name} pattern="[a-z0-9][a-z0-9-]{0,30}" onChange={(e) => setName(e.target.value)} />
-          <small>Minúsculas, números y guiones.</small>
-        </label>
-        <label className="field">Conversaciones nuevas
-          <select value={spawn} onChange={(e) => setSpawn(e.target.value as any)}>
-            <option value="same-dir">Comparten la carpeta (same-dir)</option>
-            <option value="worktree" disabled={!isNew && !chosen?.git}>Una copia git por conversación (worktree){!isNew && !chosen?.git ? ' — necesita git' : ''}</option>
-          </select>
-        </label>
-        <label className="inline"><input type="checkbox" className="switch" checked={autostart} onChange={(e) => setAutostart(e.target.checked)} /> Arrancar al encender</label>
-        <label className="inline"><input type="checkbox" className="switch" checked={trust} onChange={(e) => setTrust(e.target.checked)} /> Confío en esta carpeta (Claude podrá leer, editar y ejecutar en ella)</label>
-        {error && <p className="error-text">{error}</p>}
-        <div className="dialog-actions">
-          <button type="button" className="btn ghost" onClick={() => ref.current?.close()}>Cancelar</button>
-          <button className="btn primary" disabled={busy || !dir}>{busy ? 'Añadiendo…' : 'Añadir'}</button>
-        </div>
-      </form>
-    </dialog>
-  )
-}
-
-function EventsView() {
-  const [events, setEvents] = useState<Event[]>([])
-  useEffect(() => {
-    const load = () => api<Event[]>('events?limit=300').then(setEvents).catch(() => {})
-    load()
-    const t = window.setInterval(load, 4000)
-    return () => window.clearInterval(t)
-  }, [])
-  return (
-    <div className="log">
-      {events.length === 0 && <div className="t">Sin eventos.</div>}
-      {events.map((e) => (
-        <div key={e.id}>
-          <span className="t">{new Date(e.ts).toLocaleString('es-ES', {dateStyle: 'short', timeStyle: 'medium'})}</span>{'  '}
-          <span className="t">[{e.project}]</span>{'  '}<span className={e.level}>{e.msg}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function AccountView({st, act, refresh}: {st: AppState; act: (fn: () => Promise<unknown>, ok?: string) => void; refresh: () => void}) {
-  const [url, setUrl] = useState<string | null>(null)
-  const [code, setCode] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
-
-  const start = async () => {
-    setBusy(true)
-    setMsg('')
-    setCode('')
-    try {
-      const r = await api<{url: string | null}>('account/login', {method: 'POST'})
-      setUrl(r.url)
-      if (!r.url) setMsg('No apareció el enlace. Mira la pestaña Terminal → cuenta.')
-    } catch (e: any) {
-      setMsg(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const sendCode = async (e: FormEvent) => {
-    e.preventDefault()
-    setBusy(true)
-    try {
-      const r = await api<{ok: boolean; message: string}>('account/code', {method: 'POST', body: {code}})
-      setMsg(r.message)
-      if (r.ok) { setUrl(null); setCode(''); refresh() }
-    } catch (e: any) {
-      setMsg(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section style={{display: 'flex', flexDirection: 'column', gap: 14}}>
-      <div className="panel">
-        <h2>Cuenta de Claude</h2>
-        <dl className="kv">
-          <dt>Estado</dt><dd><Pill s={st.account.loggedIn ? 'disponible' : 'atencion'} /> {st.account.loggedIn ? 'Conectada' : 'Sin sesión'}</dd>
-          {st.account.email && <><dt>Cuenta</dt><dd>{st.account.email}{st.account.plan ? ` · plan ${st.account.plan}` : ''}</dd></>}
-          <dt>Claude Code</dt><dd className="mono">{st.claudeVersion} · actualizaciones con la app</dd>
-          <dt>App</dt><dd className="mono">{st.version}</dd>
-        </dl>
-
-        {!url ? (
-          <div><button className="btn primary" disabled={busy} onClick={start}>{st.account.loggedIn ? 'Volver a iniciar sesión' : 'Iniciar sesión'}</button></div>
-        ) : (
-          <ol className="steps">
-            <li>Abre este enlace, entra con tu cuenta y autoriza: <a className="login-link" href={url} target="_blank" rel="noopener">Autorizar en claude.ai ↗</a></li>
-            <li>Copia el código que te muestra y pégalo aquí:
-              <form className="row-form" onSubmit={sendCode} style={{marginTop: 6}}>
-                <input type="text" autoComplete="off" spellCheck={false} placeholder="Código de autorización" value={code} onChange={(e) => setCode(e.target.value)} required />
-                <button className="btn primary" disabled={busy || !code.trim()}>{busy ? 'Comprobando…' : 'Conectar'}</button>
-                <button type="button" className="btn ghost" onClick={() => setUrl(null)}>Cancelar</button>
-              </form>
-            </li>
-          </ol>
-        )}
-        {msg && <p className="hint">{msg}</p>}
-        <p className="hint">El código sólo vale para el enlace de este intento. Las credenciales se quedan en el servidor y nunca se muestran aquí.</p>
-      </div>
-
-      <div className="panel">
-        <h2>Recuperación</h2>
-        <label className="inline" style={{fontSize: 14, color: 'var(--fg)'}}>
-          <input type="checkbox" className="switch" checked={st.autoRescue}
-            onChange={(e) => act(() => api('settings', {method: 'PATCH', body: {autoRescue: e.target.checked}}), e.target.checked ? 'Rescate automático activado' : 'Rescate automático desactivado')} />
-          Rescatar automáticamente las conversaciones tras un apagado inesperado
-        </label>
-        <p className="hint">Tras un corte de luz, las conversaciones que estaban abiertas no vuelven solas. El gestor las rescata una a una y después el servidor del proyecto las sigue atendiendo como siempre.</p>
-      </div>
-    </section>
-  )
+          {terminal ? <TerminalPane key={`${terminal.provider}:${terminal.window}`} provider={terminal.provider} window={terminal.window} /> : <div className="empty-projects"><h3>Elige una terminal</h3><p>Abre un proyecto de Claude o Codex, o usa la terminal de la cuenta de Claude. Cambiar de sección no cierra la sesión en el servidor.</p><div className="actions"><button className="btn" disabled={!!busy.claude || !!state.providerErrors.claude || state.providers.claude?.worker?.state!=='ready'} onClick={openAccountTerminal}>Terminal de la cuenta de Claude</button><button className="btn" onClick={() => setTab('proyectos')}>Ver proyectos</button></div></div>}
+        </section>}
+        {tab==='registro' && <section className="events-section" aria-labelledby="events-title"><div className="toolbar"><div><h2 id="events-title">Actividad de los agentes</h2><p className="hint">Los errores y cambios de estado aparecen por separado.</p></div><button className="btn" onClick={() => void refresh()}>Actualizar</button></div><div className="event-filters" aria-label="Filtrar actividad">{(['all',...PROVIDERS] as const).map(provider => <button className="btn small" key={provider} aria-pressed={eventFilter===provider} onClick={() => setEventFilter(provider)}>{provider==='all' ? 'Todos' : PROVIDER_LABEL[provider]}</button>)}</div>{events.length ? <ol className="events">{events.map((event,index) => <li className={`event event-${event.level}`} key={`${event.provider}-${event.at}-${index}`}><time dateTime={event.at}>{new Date(event.at).toLocaleString('es-ES',{dateStyle:'short',timeStyle:'medium'})}</time><span className="event-level">{event.provider==='claude' ? 'Claude' : 'Codex'}<br />{event.level==='error' ? 'Error' : event.level==='warn' ? 'Aviso' : 'Info'}</span><p>{event.message}</p></li>)}</ol> : <p className="empty-log">Todavía no hay eventos de {eventFilter==='all' ? 'los agentes' : PROVIDER_LABEL[eventFilter]}.</p>}</section>}
+      </main><footer><span>Remote Control {state.version}</span><span>Versiones fijadas con la app; cuentas independientes</span></footer>
+    </>}
+    {adding && <AddDialog onClose={() => setAdding(false)} onDone={async () => {setAdding(false);await refresh()}} />}
+    {notice && <div className="toast" role="status">{notice}</div>}
+  </div>
 }

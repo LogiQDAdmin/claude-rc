@@ -1,11 +1,12 @@
 {
-  "name": "claude-rc-web",
-  "version": "0.1.0",
+  "name": "agent-rc-web",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p . && vite build"
+    "build": "tsc -p . && vite build",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

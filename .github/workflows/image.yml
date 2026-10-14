@@ -1,4 +1,4 @@
-# Construye la imagen y la publica en ghcr.io/logiqd/claude-rc al crear una etiqueta vX.Y.Z.
+# Construye la imagen y la publica en ghcr.io/logiqdadmin/claude-rc al crear una etiqueta vX.Y.Z.
 # Umbrel no puede usar imágenes construidas en local: las descarga de un registro.
 name: Imagen
 
@@ -35,7 +35,7 @@ jobs:
           build-args: |
             CLAUDE_VERSION=${{ steps.v.outputs.claude }}
             APP_VERSION=${{ steps.v.outputs.app }}
-          tags: ghcr.io/logiqd/claude-rc:${{ steps.v.outputs.app }}
+          tags: ghcr.io/logiqdadmin/claude-rc:${{ steps.v.outputs.app }}
           labels: |
-            org.opencontainers.image.source=https://github.com/LogiQD/claude-rc
+            org.opencontainers.image.source=https://github.com/LogiQDAdmin/claude-rc
             org.opencontainers.image.description=Gestor de Claude Remote Control para Ubuntu y Umbrel

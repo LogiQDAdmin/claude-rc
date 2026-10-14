@@ -4,7 +4,7 @@ name: claude-rc
 
 services:
   claude-rc:
-    image: ghcr.io/logiqd/claude-rc:0.1.0
+    image: ghcr.io/logiqdadmin/claude-rc:0.1.1
     container_name: claude-rc
     environment:
       TZ: Europe/Madrid

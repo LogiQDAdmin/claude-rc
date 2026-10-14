@@ -46,11 +46,11 @@ las conversaciones, pero los servidores siguen funcionando.
 
 **Ubuntu**: `deploy/ubuntu/compose.yaml` (panel en `127.0.0.1:7681`, se entra por túnel SSH).
 
-**Umbrel**: tienda de apps `https://github.com/LogiQD/umbrel-app-store` → app «Remote Control».
+**Umbrel**: tienda de apps `https://github.com/LogiQDAdmin/umbrel-app-store` → app «Remote Control».
 En los ajustes de la app se elige la carpeta de proyectos.
 
 **Versión nueva**: cambiar `CLAUDE_VERSION` si toca, `git tag vX.Y.Z && git push --tags`. La
-acción de GitHub publica `ghcr.io/logiqd/claude-rc:X.Y.Z`; después, subir el número en la tienda.
+acción de GitHub publica `ghcr.io/logiqdadmin/claude-rc:X.Y.Z`; después, subir el número en la tienda.
 
 ## Límites conocidos
 

@@ -15,9 +15,10 @@ process.env.CODEX_TMUX_SOCKET = 'agent-rc-codex-test';
 const {createCodexDriver} = await import('../dist/providers/codex/driver.js');
 const {q,db} = await import('../dist/providers/codex/db.js');
 const lifecycle = [];
+const deviceLogin = {state:'pending',verificationUrl:'https://auth.openai.com/codex/device',userCode:'TEST-CODE'};
 const service = {
-  state: () => ({account:{loggedIn:false},server:{state:'incompatible',detail:'changed schema',restarts:1,experimental:true},
-    login:{state:'idle'},projects:q.projects().map(p=>({...p,trust:p.trust===1})),events:[]}),
+  state: () => ({version:'0.2.0-fixture',codexVersion:'0.162.1',account:{loggedIn:false},server:{state:'incompatible',detail:'changed schema',restarts:1,experimental:true},
+    login:{...deviceLogin},projects:q.projects().map(p=>({...p,trust:p.trust===1})),events:[]}),
   boot:async()=>lifecycle.push('boot'),shutdown:async()=>lifecycle.push('shutdown'),
   startLogin:()=>({state:'pending'}),cancelLogin:()=>({state:'idle'}),
   startServer:async()=>lifecycle.push('start'),stopServer:async()=>lifecycle.push('stop'),restartServer:async()=>lifecycle.push('restart'),
@@ -33,7 +34,14 @@ test('Codex driver keeps incompatible state visible and routes only its own life
   assert.equal(state.provider,'codex');
   assert.equal(state.cliVersion,'0.162.1');
   assert.equal(state.server.state,'incompatible');
-  assert.equal(state.details.server.detail,'changed schema');
+  assert.equal(state.server.detail,'changed schema');
+  assert.deepEqual(state.login,deviceLogin);
+  assert.deepEqual(Object.keys(state.details).sort(),['codexVersion','events','projects','version']);
+  assert(!('login' in state.details));
+  assert(!('account' in state.details));
+  assert(!('server' in state.details));
+  assert(!JSON.stringify(state.details).includes('TEST-CODE'));
+  assert(!JSON.stringify(state.details).includes('https://auth.openai.com'));
   await driver.boot();
   await driver.request('server.restart',{});
   assert.deepEqual(await driver.request('login.start',{}),{state:'pending'});

@@ -14,7 +14,11 @@ export async function runFixture(provider) {
       if (action==='hang-request') await new Promise(()=>{})
       if (action==='bad-state') { process.send({type:'state',state:{provider,unexpected:'changed-format'}});return {accepted:true} }
       if (action==='throw-private') throw new Error('synthetic-private-token-never-publish')
-      if (action==='pending-login') { state.login={state:'pending',verificationUrl:'https://fixture.invalid/device',userCode:'TEST-ONLY'};return state.login }
+      if (action==='pending-login') {
+        state.login={state:'pending',verificationUrl:'https://fixture.invalid/device',userCode:'TEST-ONLY'}
+        state.details={marker:'keep metadata',login:{...state.login}}
+        return state.login
+      }
       return {ok:true}
     },
     shutdown:async()=> {

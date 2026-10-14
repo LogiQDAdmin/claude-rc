@@ -12,8 +12,11 @@ function projectId(value: unknown) {
 
 export function createCodexDriver(service: Manager = manager): ProviderDriver {
   const state = (): ProviderState => {
-    const details = service.state()
-    return {provider:'codex',cliVersion:config.codexVersion,account:details.account,server:details.server,login:details.login,details}
+    const value = service.state()
+    // Ephemeral login material has one owner. Duplicating it under details
+    // would bypass the common supervisor's cleanup after a worker failure.
+    const details = {version:value.version,codexVersion:value.codexVersion,projects:value.projects,events:value.events}
+    return {provider:'codex',cliVersion:config.codexVersion,account:value.account,server:value.server,login:value.login,details}
   }
   return {
     boot: async () => {

@@ -37,14 +37,20 @@ export class Supervisor {
     this.slots = {claude:make('claude'),codex:make('codex')}
   }
   subscribe(callback:()=>void) { this.onState=callback }
+  private clearEphemeral(state:ProviderState) {
+    state.login={state:'idle'}
+    // details is a compatibility DTO; never retain a second copy of a login
+    // challenge after its worker no longer owns a live authorization flow.
+    if (state.details) delete state.details.login
+  }
   boot() { for (const provider of ['claude','codex'] as const) if (this.slots[provider].enabled) this.launch(provider) }
   state(provider:ProviderId):ProviderState {
     const slot=this.slots[provider]
     const value=structuredClone(slot.state)
     value.worker={state:slot.phase,restarts:slot.restarts}
+    if (slot.phase!=='ready' || !slot.enabled || slot.stopping) this.clearEphemeral(value)
     if (slot.phase!=='ready') {
       value.account.stale=true
-      value.login={state:'idle'}
       value.server={...value.server,state:slot.phase==='starting'?'iniciando':slot.phase==='stopped'?'detenido':slot.blocked?'incompatible':'caido',
         detail:slot.failure??(slot.phase==='starting'?'Iniciando el proceso del proveedor':'Proveedor detenido'),lastError:slot.failure,restarts:slot.restarts}
     }
@@ -77,7 +83,9 @@ export class Supervisor {
       if (slot.child!==child || slot.phase==='failed' || slot.phase==='stopped') return
       if (message?.type==='state') {
         if (!validState(message.state,provider)) return this.fail(slot,child,'El proveedor cambió el formato de su estado; revisa la compatibilidad',true)
-        slot.state=message.state;slot.phase='ready';slot.failure=undefined;slot.lastStateAt=Date.now()
+        slot.state=message.state
+        if (!slot.enabled || slot.stopping) this.clearEphemeral(slot.state)
+        slot.phase='ready';slot.failure=undefined;slot.lastStateAt=Date.now()
         clearTimeout(slot.boot);this.onState?.()
       } else if (message?.type==='response' && Number.isSafeInteger(message.id) && [true,false].includes(message.ok)) {
         const pending=slot.pending.get(message.id)
@@ -95,6 +103,7 @@ export class Supervisor {
     if (slot.child!==child) return
     clearTimeout(slot.boot);clearInterval(slot.watch)
     slot.child=undefined
+    this.clearEphemeral(slot.state)
     this.rejectPending(slot)
     if (slot.enabled && !this.closing) {
       slot.phase='failed';slot.failure??='El proceso del proveedor se cayó; se reintentará su arranque'
@@ -116,6 +125,7 @@ export class Supervisor {
   private fail(slot:Slot,child:ChildProcess,message:string,blocked=false) {
     if (slot.child!==child || slot.phase==='failed' || slot.phase==='stopped') return
     slot.failure=message;slot.phase='failed';slot.blocked=blocked
+    this.clearEphemeral(slot.state)
     clearTimeout(slot.boot);clearInterval(slot.watch);this.rejectPending(slot);this.onState?.()
     child.kill('SIGKILL')
   }
@@ -147,6 +157,7 @@ export class Supervisor {
   async stop(provider:ProviderId,persist=true) {
     const slot=this.slots[provider]
     slot.enabled=false
+    this.clearEphemeral(slot.state)
     if (persist) this.catalog.setEnabled(provider,false)
     clearTimeout(slot.retry);clearTimeout(slot.boot);clearInterval(slot.watch)
     if (slot.stopping) return slot.stopping
@@ -166,6 +177,7 @@ export class Supervisor {
       }
       await slot.cleaning
       slot.phase='stopped';slot.failure=undefined
+      this.clearEphemeral(slot.state)
       this.onState?.()
     })()
     slot.stopping=stopping

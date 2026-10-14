@@ -26,6 +26,15 @@ function fixture(env={},Class=Supervisor) {
   }}
 }
 const ready = supervisor=>supervisor.slots.claude.phase==='ready'&&supervisor.slots.codex.phase==='ready'
+function noChallenge(supervisor,provider) {
+  for (const state of [supervisor.state(provider),supervisor.slots[provider].state]) {
+    assert.equal(state.login.userCode,undefined)
+    assert.equal(state.login.verificationUrl,undefined)
+    assert.equal(state.details?.login,undefined)
+    assert(!JSON.stringify(state).includes('TEST-ONLY'))
+    assert(!JSON.stringify(state).includes('fixture.invalid/device'))
+  }
+}
 
 test('real IPC worker crash preserves the other provider and clears ephemeral login',async()=> {
   const f = fixture()
@@ -34,12 +43,47 @@ test('real IPC worker crash preserves the other provider and clears ephemeral lo
     const other = await f.supervisor.request('codex','identity')
     await f.supervisor.request('claude','pending-login')
     assert.equal(f.supervisor.state('claude').login.userCode,'TEST-ONLY')
+    assert.equal(f.supervisor.state('claude').details.login.userCode,'TEST-ONLY')
+    let clearedDuringFailure=false
+    f.supervisor.subscribe(()=> {
+      if (f.supervisor.slots.claude.phase==='failed') { noChallenge(f.supervisor,'claude');clearedDuringFailure=true }
+    })
     const pid = f.supervisor.slots.claude.child.pid
     await f.supervisor.request('claude','crash')
     await until(()=>f.supervisor.slots.claude.child?.pid!==pid&&f.supervisor.slots.claude.phase==='ready')
     assert.deepEqual(await f.supervisor.request('codex','identity'),other)
     assert.equal(f.supervisor.state('claude').login.userCode,undefined)
+    noChallenge(f.supervisor,'claude')
+    assert.equal(clearedDuringFailure,true)
     assert(f.supervisor.slots.claude.restarts>=1)
+  } finally { await f.close() }
+})
+
+test('malformed protocol and explicit stop discard normalized and legacy login copies from RAM',async()=> {
+  const f = fixture({AGENT_FIXTURE_CODEX_MODE:'slow-stop'})
+  try {
+    f.supervisor.boot();await until(()=>ready(f.supervisor))
+    await f.supervisor.request('claude','pending-login')
+    assert.equal(f.supervisor.state('claude').details.login.userCode,'TEST-ONLY')
+    await assert.rejects(f.supervisor.request('claude','bad-state'))
+    await until(()=>f.supervisor.state('claude').server.state==='incompatible')
+    noChallenge(f.supervisor,'claude')
+    assert.equal(f.supervisor.state('claude').details.marker,'keep metadata')
+    await f.supervisor.request('codex','pending-login')
+    assert.equal(f.supervisor.state('codex').details.login.userCode,'TEST-ONLY')
+    const stopped=f.supervisor.stop('codex')
+    noChallenge(f.supervisor,'codex')
+    await stopped
+    noChallenge(f.supervisor,'codex')
+    assert.equal(f.supervisor.state('codex').details.marker,'keep metadata')
+    // Projection also strips a future compatibility DTO accidentally restored
+    // while the provider is down, without touching unrelated cached metadata.
+    f.supervisor.slots.codex.state.login={state:'pending',userCode:'TEST-ONLY'}
+    f.supervisor.slots.codex.state.details.login={state:'pending',userCode:'TEST-ONLY'}
+    const projected=f.supervisor.state('codex')
+    assert.equal(projected.details.login,undefined)
+    assert.equal(projected.login.userCode,undefined)
+    assert(!JSON.stringify(projected).includes('TEST-ONLY'))
   } finally { await f.close() }
 })
 

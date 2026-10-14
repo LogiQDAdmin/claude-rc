@@ -17,7 +17,7 @@ Cambiar un archivo de versión exige construir y validar una nueva imagen. No ha
 Cada proveedor tiene su propio bloque de cuenta y sus botones. Abrir el panel no inicia un login.
 
 - **Claude:** el panel ejecuta el flujo oficial de Claude, muestra el enlace y permite introducir el código que entregue su web. Conserva Remote Control por proyecto, preguntas de confianza, terminales, conversaciones, modos de spawn y recuperación de conversaciones huérfanas con su identificador original.
-- **Codex:** el panel ejecuta `codex login --device-auth`, muestra el enlace oficial y el código de dispositivo; el usuario completa el proceso en la web. El código vive sólo en memoria y se borra al cancelar, caducar o terminar. No se pide la contraseña de OpenAI en el panel. El app-server ofrece estado de cuenta, estado remoto y emparejamiento experimental; cada proyecto tiene su terminal CLI.
+- **Codex:** el panel ejecuta `codex login --device-auth`, muestra el enlace oficial y el código de dispositivo; el usuario completa el proceso en la web. El código vive sólo en memoria y se borra al cancelar, caducar, terminar o caer/detenerse su worker. El estado público evita duplicarlo en otros campos. No se pide la contraseña de OpenAI en el panel. El app-server ofrece estado de cuenta, estado remoto y emparejamiento experimental; cada proyecto tiene su terminal CLI.
 
 Al añadir un proyecto se elige Claude, Codex o ambos. También se puede añadir el otro proveedor a una carpeta existente. Los archivos del proyecto se conservan al quitar una asociación o eliminarla del catálogo. El permiso de confianza se concede por proveedor. Revocarlo cierra sus terminales; en Claude también detiene su proceso de proyecto.
 

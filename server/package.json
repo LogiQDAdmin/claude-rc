@@ -1,12 +1,13 @@
 {
-  "name": "claude-rc-server",
-  "version": "0.1.0",
+  "name": "agent-rc-server",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Gestor de Claude Remote Control: supervisa un `claude remote-control` por proyecto y recupera las conversaciones tras reiniciar",
+  "description": "Remote Control — Claude y Codex con procesos independientes y versiones fijadas",
   "scripts": {
     "build": "tsc -p .",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "engines": {
     "node": ">=24"

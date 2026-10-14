@@ -1,0 +1,21 @@
+name: agent-rc-local
+services:
+  agent-rc:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: 0.2.0-local
+    image: agent-rc:local
+    restart: unless-stopped
+    ports:
+      - "${PANEL_BIND:-127.0.0.1}:3782:8080"
+    environment:
+      PANEL_PASSWORD: "${PANEL_PASSWORD:-}"
+    volumes:
+      - agent-rc-data:/data
+      - agent-rc-projects:/projects
+    stop_grace_period: 60s
+volumes:
+  agent-rc-data:
+  agent-rc-projects:

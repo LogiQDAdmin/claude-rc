@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
-import {config} from './config.js'
+import {config, cliEnvironment} from './config.js'
 
 const run = promisify(execFile)
 
@@ -10,7 +10,7 @@ export type Account = {loggedIn: boolean; email?: string; plan?: string; method?
 
 export async function authStatus(): Promise<Account> {
   try {
-    const {stdout} = await run('claude', ['auth', 'status'], {timeout: 20_000})
+    const {stdout} = await run(config.claudeBinary, ['auth', 'status'], {timeout: 20_000,env:cliEnvironment(),maxBuffer:64*1024})
     const s = JSON.parse(stdout)
     return {loggedIn: Boolean(s.loggedIn), email: s.email, plan: s.subscriptionType, method: s.authMethod}
   } catch (e: any) {
@@ -19,14 +19,14 @@ export async function authStatus(): Promise<Account> {
       const s = JSON.parse(e.stdout ?? '')
       return {loggedIn: Boolean(s.loggedIn), method: s.authMethod}
     } catch {
-      return {loggedIn: false, error: String(e.message ?? e).slice(0, 200)}
+      return {loggedIn: false, error:'No se pudo comprobar la cuenta de Claude'}
     }
   }
 }
 
 export async function claudeVersion() {
   try {
-    const {stdout} = await run('claude', ['--version'], {timeout: 10_000})
+    const {stdout} = await run(config.claudeBinary, ['--version'], {timeout: 10_000,env:cliEnvironment(),maxBuffer:4096})
     return stdout.trim().split(' ')[0]
   } catch {
     return '?'
@@ -56,6 +56,17 @@ function procStart(pid: number): string | null {
   }
 }
 
+// La comprobación de starttime distingue una sesión viva de un PID reutilizado.
+// Separada para probar fixtures sin consultar procesos ni sesiones reales.
+export function sessionRecord(s:any,readStart:(pid:number)=>string|null = procStart):LiveSession|null {
+  if (!s?.bridgeSessionId || !s.sessionId || !s.cwd) return null
+  return {
+    pid:Number(s.pid),localId:String(s.sessionId),remoteId:String(s.bridgeSessionId),cwd:String(s.cwd),
+    status:String(s.status??''),updatedAt:Number(s.statusUpdatedAt??s.updatedAt??s.startedAt??0),
+    alive:s.procStart!=null && readStart(Number(s.pid))===String(s.procStart),
+  }
+}
+
 export function scanSessions(): LiveSession[] {
   const dir = path.join(config.claudeConfigDir, 'sessions')
   let files: string[] = []
@@ -68,17 +79,8 @@ export function scanSessions(): LiveSession[] {
   for (const f of files) {
     try {
       const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))
-      if (!s.bridgeSessionId || !s.sessionId || !s.cwd) continue
-      const alive = s.procStart != null && procStart(Number(s.pid)) === String(s.procStart)
-      out.push({
-        pid: Number(s.pid),
-        localId: String(s.sessionId),
-        remoteId: String(s.bridgeSessionId),
-        cwd: String(s.cwd),
-        status: String(s.status ?? ''),
-        updatedAt: Number(s.statusUpdatedAt ?? s.updatedAt ?? s.startedAt ?? 0),
-        alive,
-      })
+      const session = sessionRecord(s)
+      if (session) out.push(session)
     } catch {}
   }
   return out

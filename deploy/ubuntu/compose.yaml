@@ -1,21 +1,21 @@
-# Despliegue en Ubuntu (pc-compute). Copia de referencia: el stack vivo está en /opt/stacks/claude-rc.
-# El panel escucha sólo en 127.0.0.1: entrar con `ssh -L 7681:127.0.0.1:7681 pc` → http://localhost:7681
+# Example deployment after publication approval. Keep the existing app identity
+# and attach the existing /data volume explicitly; never copy credentials.
 name: claude-rc
 
 services:
   claude-rc:
-    image: ghcr.io/logiqdadmin/claude-rc:0.1.1
+    image: ghcr.io/logiqdadmin/claude-rc:0.2.0
     container_name: claude-rc
     environment:
       TZ: Europe/Madrid
-      RC_NAME_PREFIX: proto
+      RC_NAME_PREFIX: rc
       PROJECT_ROOTS: /projects,/data/proyectos
     ports:
-      - "127.0.0.1:7681:8080"
+      - "127.0.0.1:3781:8080"
     volumes:
-      - /srv/appdata/claude-rc/data:/data
-      - /srv/appdata/claude-rc/projects:/projects
+      - "${AGENT_RC_DATA:?Select the existing app data directory}:/data"
+      - "${AGENT_RC_PROJECTS:?Select the project directory}:/projects"
     # Tiempo para que cada servidor reciba Ctrl+C y cierre limpio (si no, cuenta como apagón)
-    stop_grace_period: 45s
+    stop_grace_period: 60s
     mem_limit: 4g
     restart: unless-stopped

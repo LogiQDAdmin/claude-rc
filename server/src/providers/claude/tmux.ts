@@ -1,6 +1,6 @@
 import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
-import {config} from './config.js'
+import {config, cliEnvironment} from './config.js'
 
 // Los procesos de Claude viven en un servidor tmux propio: así sobreviven a un reinicio del
 // gestor y sus preguntas por consola (Trust, Enable Remote Control) se pueden contestar.
@@ -8,7 +8,7 @@ const run = promisify(execFile)
 const S = config.tmuxSession
 
 async function tmux(...args: string[]) {
-  const {stdout} = await run('tmux', ['-L', config.tmuxSocket, ...args], {maxBuffer: 4 * 1024 * 1024})
+  const {stdout} = await run('tmux', ['-L', config.tmuxSocket, ...args], {maxBuffer: 4 * 1024 * 1024,timeout:10_000,env:cliEnvironment()})
   return stdout
 }
 
@@ -38,7 +38,7 @@ export async function panes(): Promise<Map<string, Pane>> {
 
 // Ventana con un comando. Si ya existe (viva o muerta) se sustituye su proceso.
 export async function runIn(window: string, cwd: string, command: string[], env: Record<string, string> = {}) {
-  const envArgs = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`])
+  const envArgs = Object.entries({CLAUDE_CONFIG_DIR:config.claudeConfigDir,DISABLE_UPDATES:'1',...env}).flatMap(([k, v]) => ['-e', `${k}=${v}`])
   const existing = await panes()
   if (existing.has(window)) {
     await tmux('respawn-pane', '-k', '-t', `${S}:${window}`, '-c', cwd, ...envArgs, ...command)

@@ -1,0 +1,23 @@
+{
+  "name": "claude-rc-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gestor de Claude Remote Control: supervisa un `claude remote-control` por proyecto y recupera las conversaciones tras reiniciar",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/index.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.3"
+  }
+}

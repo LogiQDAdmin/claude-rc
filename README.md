@@ -1,6 +1,6 @@
 # Remote Control — Claude y Codex
 
-Una app y un contenedor para Claude Code y Codex. El panel conserva el gestor de proyectos, conversaciones y recuperación de Claude RC 0.1.1 y añade Codex como proveedor independiente. La integración de Codex es experimental. Esta rama 0.2.0 está preparada para pruebas locales; publicarla y actualizar una instalación existente son pasos separados.
+Una app y un contenedor para Claude Code y Codex. El panel conserva el gestor de proyectos, conversaciones y recuperación de Claude RC 0.1.1 y añade Codex como proveedor independiente. La integración de Codex es experimental. Versión 0.2.0: publicar una imagen y actualizar una instalación existente son pasos separados.
 
 ## Versiones y actualizaciones
 
@@ -85,6 +85,6 @@ Las pruebas cubren los proveedores, los parsers y errores de protocolo, confianz
 
 ## Umbrel y publicación
 
-La propuesta 0.2.0 mantiene el ID **`logiqd-claude-rc`**, el puerto **3781**, los montajes y los datos de la app instalada. Sólo cambia el nombre visible a **Remote Control — Claude y Codex** y añade el proveedor. El puerto 3782 se usa para validación local independiente. No hace falta recrear Umbrel para el puerto de la app existente.
+La versión 0.2.0 mantiene el ID **`logiqd-claude-rc`**, el puerto **3781**, los montajes y los datos de la app instalada. Cambia el nombre visible a **Remote Control — Claude y Codex** y añade el proveedor. El puerto 3782 se usa para validación local independiente. No hace falta recrear Umbrel para el puerto de la app existente.
 
-El workflow y el manifest de tienda preparados son borradores locales. Crear tags, hacer push, publicar GHCR, actualizar la tienda o sustituir una instalación necesita autorización aparte. La imagen original 0.1.1 no se sobreescribe.
+El tag `v0.2.0` ejecuta el workflow que publica `ghcr.io/logiqdadmin/claude-rc:0.2.0` para `linux/amd64`. La tienda debe apuntar a esa versión después de que el workflow termine correctamente y la imagen sea descargable sin credenciales. Publicar la actualización no la instala: el usuario la inicia desde la interfaz de Umbrel. La imagen original 0.1.1 no se sobrescribe.

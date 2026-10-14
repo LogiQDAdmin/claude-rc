@@ -132,7 +132,20 @@ export function createPanel(catalog:Catalog,supervisor:Supervisor,options:PanelO
         return json(res,200,state())
       }
       if (method==='PATCH'&&parts[2]==='settings') return json(res,200,await supervisor.request(pid,'settings.update',await body(req)))
-      if (method==='POST'&&parts[2]==='pair'&&pid==='codex') return json(res,200,await supervisor.request(pid,'remote.pair'))
+      if (method==='POST'&&parts[2]==='pair'&&pid==='codex') {
+        if (url.search) throw new HttpError(400,'El emparejamiento no admite códigos en la URL')
+        const supplied=await body(req)
+        if (parts.length===3) {
+          if (Object.keys(supplied).length) throw new HttpError(400,'No envíes códigos al generar un intento de emparejamiento')
+          return json(res,200,await supervisor.request(pid,'remote.pair'))
+        }
+        if (parts.length===4&&['status','cancel'].includes(parts[3])) {
+          if (Object.keys(supplied).length!==1 || typeof supplied.attemptId!=='string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(supplied.attemptId))
+            throw new HttpError(400,'Indica sólo el identificador local del intento; nunca su código')
+          return json(res,200,await supervisor.request(pid,`remote.pair.${parts[3]}`,{attemptId:supplied.attemptId}))
+        }
+        throw new HttpError(404,'Acción de emparejamiento desconocida')
+      }
       if (method==='POST'&&parts[2]==='terminal') return json(res,200,await openTerminal(pid))
     }
     // Compatibility routes keep the 0.1.1 account and project actions available.

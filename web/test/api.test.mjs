@@ -120,6 +120,51 @@ test('authorization URLs cannot mix the two login flows',() => {
   for (const unsafe of ['javascript:alert(1)','https://example.invalid/authorize','http://claude.ai/oauth/authorize']) assert.equal(loginUrl(unsafe,'claude'),undefined)
 })
 
+test('accepts Claude Code 2.1.294 current OAuth URL with its complete synthetic query unchanged',() => {
+  const query='code=true&client_id=fixture-client-id&response_type=code&redirect_uri=https%3A%2F%2Fclaude.com%2Fcai%2Foauth%2Fcode&scope=user%3Aprofile+user%3Ainference&code_challenge=fixture-challenge-with-placeholder-value&code_challenge_method=S256&state=fixture-state-with-placeholder-value'
+  const url=`https://claude.com/cai/oauth/authorize?${query}`
+  assert.equal(loginUrl(url,'claude'),url)
+  assert.equal(new URL(loginUrl(url,'claude')).search,`?${query}`)
+  assert.equal(loginUrl(url,'codex'),undefined)
+})
+
+test('rejects lookalike hosts and alternate paths for the current Claude authorization endpoint',() => {
+  for (const unsafe of [
+    'http://claude.com/cai/oauth/authorize',
+    'https://claude.com.evil.invalid/cai/oauth/authorize',
+    'https://login.claude.com/cai/oauth/authorize',
+    'https://claude.com./cai/oauth/authorize',
+    'https://clau\nde.com/cai/oauth/authorize',
+    'https://cla\tude.com/cai/oauth/authorize',
+    'https://claude.com\\@evil.invalid/cai/oauth/authorize',
+    'https://claude.com/cai/oauth/authorize/',
+    'https://claude.com/cai/oauth/authorize.evil',
+    'https://claude.com/cai/oauth/auth%6Frize',
+    'https://claude.com/cai/oauth/authorize%2Fdevice',
+    'https://claude.com/oauth/authorize',
+    'https://claude.com/codex/device',
+    'https://fixture:fixture-password@claude.com/cai/oauth/authorize',
+    'https://claude.com:444/cai/oauth/authorize',
+  ]) assert.equal(loginUrl(unsafe,'claude'),undefined)
+})
+
+test('keeps existing provider hosts and device flow while rejecting userinfo and nondefault ports',() => {
+  for (const host of ['claude.ai','console.anthropic.com','platform.claude.com','auth.anthropic.com','anthropic.com'])
+    assert.ok(loginUrl(`https://${host}/oauth/authorize?state=fixture-state`,'claude'))
+  for (const host of ['auth.openai.com','chatgpt.com','openai.com'])
+    assert.ok(loginUrl(`https://${host}/codex/device`,'codex'))
+  for (const [url,provider] of [
+    ['https://fixture:fixture-password@claude.ai/oauth/authorize','claude'],
+    ['https://@claude.ai/oauth/authorize','claude'],
+    ['https://claude.ai:444/oauth/authorize','claude'],
+    ['https://fixture:fixture-password@auth.openai.com/codex/device','codex'],
+    ['https://auth.openai.com:444/codex/device','codex'],
+    ['https://auth.openai.com.evil.invalid/codex/device','codex'],
+  ]) assert.equal(loginUrl(url,provider),undefined)
+  assert.equal(loginUrl('https://claude.com:443/cai/oauth/authorize','claude'),'https://claude.com/cai/oauth/authorize')
+  assert.equal(loginUrl('https://auth.openai.com/codex/device','claude'),undefined)
+})
+
 function mockBrowser(t,fetcher) {
   const priorWindow=globalThis.window,priorFetch=globalThis.fetch,scheduled=[],cleared=[]
   globalThis.window={setTimeout:(callback,ms)=>{scheduled.push({callback,ms});return scheduled.length},clearTimeout:id=>cleared.push(id)}

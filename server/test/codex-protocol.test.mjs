@@ -26,7 +26,7 @@ test('fixed version and experimental response envelopes are checked',()=> {
 test('remote status and pairing validate changed schemas without exposing opaque IDs',()=> {
   assert.equal(validateRemoteStatus({status:'errored',serverName:'private-name',installationId:'private-id',environmentId:null}),'errored')
   assert.throws(()=>validateRemoteStatus({status:'new-format'}),/formato/)
-  assert.deepEqual(validatePairing({pairingCode:'opaque-secret',manualPairingCode:'TEST-PAIR',environmentId:'private-id',expiresAt:1900000000}),{manualPairingCode:'TEST-PAIR',expiresAt:1900000000})
+  assert.deepEqual(validatePairing({pairingCode:'opaque-secret',manualPairingCode:'TEST-PAIR',environmentId:'private-id',expiresAt:1900000000}),{pairingCode:'opaque-secret',manualPairingCode:'TEST-PAIR',expiresAt:1900000000})
   assert.throws(()=>validatePairing({manualPairingCode:'TEST-PAIR',expiresAt:'tomorrow'}),/formato/)
 })
 

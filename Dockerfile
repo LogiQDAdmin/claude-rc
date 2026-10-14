@@ -17,7 +17,7 @@ WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-RUN npm run build
+RUN npm test && npm run build
 
 FROM node:24-trixie-slim AS codex-build
 WORKDIR /build/codex
@@ -77,7 +77,7 @@ RUN set -eu; chmod 0555 /app/scripts/entrypoint.sh /app/scripts/codex-wrapper.mj
     test "$(/opt/codex/codex --version)" = "codex-cli $(cat /app/CODEX_VERSION)"; \
     test "$(/opt/claude/claude --version)" = "$(cat /app/CLAUDE_VERSION) (Claude Code)"; \
     test ! -e /usr/local/lib/node_modules/@anthropic-ai
-ARG APP_VERSION=0.2.0
+ARG APP_VERSION=0.2.1
 ENV NODE_ENV=production \
     APP_VERSION=$APP_VERSION \
     HOME=/data/home \

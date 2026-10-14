@@ -1,6 +1,8 @@
 # Remote Control — Claude y Codex
 
-Una app y un contenedor para Claude Code y Codex. El panel conserva el gestor de proyectos, conversaciones y recuperación de Claude RC 0.1.1 y añade Codex como proveedor independiente. La integración de Codex es experimental. Versión 0.2.0: publicar una imagen y actualizar una instalación existente son pasos separados.
+Una app y un contenedor para Claude Code y Codex. El panel conserva el gestor de proyectos, conversaciones y recuperación de Claude RC 0.1.1 y añade Codex como proveedor independiente. La integración de Codex es experimental. Versión 0.2.1: corrige el inicio de sesión de Claude y distingue la conexión al relay de Codex del emparejamiento de otro dispositivo. Publicar una imagen y actualizar una instalación existente son pasos separados.
+
+La CLI de Claude 2.1.294 genera el enlace de login `https://claude.com/cai/oauth/authorize`. El panel reconoce esta dirección exacta y conserva los enlaces oficiales anteriores; no acepta dominios parecidos ni mezcla el flujo de Claude con el de Codex.
 
 ## Versiones y actualizaciones
 
@@ -18,6 +20,12 @@ Cada proveedor tiene su propio bloque de cuenta y sus botones. Abrir el panel no
 
 - **Claude:** el panel ejecuta el flujo oficial de Claude, muestra el enlace y permite introducir el código que entregue su web. Conserva Remote Control por proyecto, preguntas de confianza, terminales, conversaciones, modos de spawn y recuperación de conversaciones huérfanas con su identificador original.
 - **Codex:** el panel ejecuta `codex login --device-auth`, muestra el enlace oficial y el código de dispositivo; el usuario completa el proceso en la web. El código vive sólo en memoria y se borra al cancelar, caducar, terminar o caer/detenerse su worker. El estado público evita duplicarlo en otros campos. No se pide la contraseña de OpenAI en el panel. El app-server ofrece estado de cuenta, estado remoto y emparejamiento experimental; cada proyecto tiene su terminal CLI.
+
+**Codex: iniciar sesión no empareja otro escritorio.** «Relay conectado» confirma que el app-server está conectado al servicio remoto. El emparejamiento es un paso separado: se inicia desde el panel y se canjea en el cliente compatible. El panel consulta `remoteControl/pairing/status` para ese intento y sólo muestra «Emparejamiento confirmado» cuando el servidor devuelve `claimed=true`. Esta confirmación acredita el canje del código; no demuestra que el cliente pueda abrir proyectos o conversaciones. El código permanece sólo en memoria hasta cerrar el intento, caducar, confirmarse o parar/reiniciar su proveedor. Cerrar borra la copia local; el código emitido por OpenAI conserva su caducidad original, porque esta API no define una operación de revocación.
+
+En la app de escritorio, la [guía oficial de conexiones remotas](https://learn.chatgpt.com/docs/remote-connections) sitúa la configuración en Ajustes → Conexiones → Controlar otros dispositivos; su disponibilidad depende del cliente y del despliegue. Utiliza el código manual únicamente si el cliente ofrece esa opción. La documentación oficial de acceso móvil describe hosts Mac/Windows con la app de escritorio, no una configuración desde Codex CLI. Este contenedor Linux usa APIs experimentales y su compatibilidad completa con esos clientes aún no está verificada. No se inventa una URL ni un QR a partir del código.
+
+La operación nativa de emparejamiento admite hasta 30 segundos de espera HTTP. El adaptador reserva 40 segundos para `pairing/start` y `pairing/status`, conservando el límite corto en el resto de llamadas. Los fallos del intento generan un diagnóstico fijo y seguro en el registro, sin códigos, identificadores opacos ni mensajes crudos del servidor.
 
 Al añadir un proyecto se elige Claude, Codex o ambos. También se puede añadir el otro proveedor a una carpeta existente. Los archivos del proyecto se conservan al quitar una asociación o eliminarla del catálogo. El permiso de confianza se concede por proveedor. Revocarlo cierra sus terminales; en Claude también detiene su proceso de proyecto.
 
@@ -51,7 +59,7 @@ El HTTP común inicia dos procesos Node por IPC; cada uno tiene grupo de proceso
 
 Estas dependencias no ofrecen un contrato estable para toda la integración:
 
-- El app-server y Remote Control de Codex 0.162.1 usan WebSocket sobre socket Unix y JSON-RPC experimental. Se validan `initialize` (incluida la versión), `account/read`, `remoteControl/status/read` y `remoteControl/pairing/start`. El backend acepta una falta de cuenta, pero rechaza envelopes, enumeraciones y campos desconocidos en estas respuestas. La interfaz muestra **Formato incompatible** o **Detenido inesperadamente**, con diagnóstico del proveedor y controles de reinicio.
+- El app-server y Remote Control de Codex 0.162.1 usan WebSocket sobre socket Unix y JSON-RPC experimental. Se validan `initialize` (incluida la versión), `account/read`, `remoteControl/status/read`, `remoteControl/pairing/start` y `remoteControl/pairing/status`. El backend acepta una falta de cuenta y valida los campos requeridos, sus tipos y las enumeraciones de estas respuestas; los campos adicionales se ignoran. La interfaz muestra **Formato incompatible** o **Detenido inesperadamente**, con diagnóstico del proveedor y controles de reinicio.
 - El modo de arranque gestionado, los nombres de opciones CLI, la ubicación `app-server-daemon/settings.json` y el formato del mensaje de `--device-auth` son específicos de esa versión. Se prueban con el binario fijado y con fixtures de formato incorrecto. Una versión nueva requiere revalidarlos.
 - Claude Remote Control se integra a través de CLI, sesiones persistidas y salida de terminal; sus mensajes y formatos también pueden cambiar. El parser y la recuperación del gestor 0.1.1 tienen pruebas de regresión.
 
@@ -62,7 +70,7 @@ Referencias oficiales: [Codex app-server](https://developers.openai.com/codex/ap
 ## Construcción y pruebas locales
 
 ```sh
-docker build --build-arg APP_VERSION=0.2.0 -t agent-rc:local .
+docker build --build-arg APP_VERSION=0.2.1 -t agent-rc:local .
 # deploy/local/compose.yaml usa sólo volúmenes propios de esta prueba.
 docker compose -f deploy/local/compose.yaml up -d
 ```
@@ -81,10 +89,10 @@ npm test
 npm run build
 ```
 
-Las pruebas cubren los proveedores, los parsers y errores de protocolo, confianza y terminales, paro manual, login separado, recuperación y campos legacy, importación idempotente, aislamiento de workers, CSRF y healthcheck. `tests/validate-runtime.mjs` comprueba dentro de un contenedor de prueba propio las versiones, hashes, permisos, configuración del updater y ausencia de arranque gestionado. Se debe repetir tras recrear y tras abrir un terminal Codex.
+Las pruebas cubren los proveedores, el enlace actual de Claude, los estados y caducidad del emparejamiento de Codex, los parsers y errores de protocolo, confianza y terminales, paro manual, login separado, recuperación y campos legacy, importación idempotente, aislamiento de workers, CSRF y healthcheck. `tests/validate-runtime.mjs` comprueba dentro de un contenedor de prueba propio las versiones, hashes, permisos, configuración del updater y ausencia de arranque gestionado. Se debe repetir tras recrear y tras abrir un terminal Codex.
 
 ## Umbrel y publicación
 
 La versión 0.2.0 mantiene el ID **`logiqd-claude-rc`**, el puerto **3781**, los montajes y los datos de la app instalada. Cambia el nombre visible a **Remote Control — Claude y Codex** y añade el proveedor. El puerto 3782 se usa para validación local independiente. No hace falta recrear Umbrel para el puerto de la app existente.
 
-El tag `v0.2.0` ejecuta el workflow que publica `ghcr.io/logiqdadmin/claude-rc:0.2.0` para `linux/amd64`. La tienda debe apuntar a esa versión después de que el workflow termine correctamente y la imagen sea descargable sin credenciales. Publicar la actualización no la instala: el usuario la inicia desde la interfaz de Umbrel. La imagen original 0.1.1 no se sobrescribe.
+El tag `v0.2.1` ejecuta el workflow que publica `ghcr.io/logiqdadmin/claude-rc:0.2.1` para `linux/amd64`. La tienda debe apuntar a esa versión después de que el workflow termine correctamente y la imagen sea descargable sin credenciales. Publicar la actualización no la instala: el usuario la inicia desde la interfaz de Umbrel. Las imágenes publicadas 0.1.1 y 0.2.0 no se sobrescriben.

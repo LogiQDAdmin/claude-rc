@@ -35,6 +35,8 @@ export function createCodexDriver(service: Manager = manager): ProviderDriver {
         case 'server.stop': await service.stopServer(); return state()
         case 'server.restart': await service.restartServer(); return state()
         case 'remote.pair': return service.pair()
+        case 'remote.pair.status': return service.pairStatus(args.attemptId)
+        case 'remote.pair.cancel': return service.cancelPairing(args.attemptId)
         case 'projects.add': {
           const name = typeof args.name === 'string' ? args.name.trim() : ''
           if (!name || name.length > 80 || /[\x00-\x1f\x7f]/.test(name)) throw new Error('Nombre de proyecto no válido')

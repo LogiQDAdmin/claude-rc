@@ -1,12 +1,14 @@
 import {useEffect, useState, type FormEvent} from 'react'
 import {api, loginUrl, PROVIDER_LABEL, SERVER_LABEL, type Provider, type ProviderState} from './api'
+import {PairingDialog} from './PairingDialog'
+import {relayPresentation} from './pairing'
 export type Scope = Provider | 'catalog'
 export type Action = (scope: Scope, key: string, work: () => Promise<unknown>, success?: string) => Promise<boolean>
 
 export function ProviderCard({provider, state, schemaError, actionError, busy, act, onLog, onAccountTerminal}: {provider: Provider; state: ProviderState | null; schemaError?: string; actionError?: string; busy?: string; act: Action; onLog: () => void; onAccountTerminal: () => void}) {
   const [code, setCode] = useState('')
   const [copyMessage, setCopyMessage] = useState('')
-  const [pair, setPair] = useState<{manualPairingCode: string; expiresAt: number} | null>(null)
+  const [pairDialog, setPairDialog] = useState(false)
   const root = `providers/${provider}`
   const login = state?.login
   const pending = login?.state === 'pending'
@@ -16,9 +18,9 @@ export function ProviderCard({provider, state, schemaError, actionError, busy, a
   const unavailable = !!workerUnavailable || stale
   const accountName = provider === 'claude' ? 'Cuenta de Claude' : 'Cuenta de ChatGPT'
   const failed = login?.state === 'error' || login?.state === 'expired'
+  const relay=state?.server.remoteControl ? relayPresentation(state.account.loggedIn,state.server.remoteControl) : undefined
   useEffect(() => { if (login?.state !== 'pending') setCode('') }, [login?.state])
-  useEffect(() => { if (!pair) return; const timer = window.setTimeout(() => setPair(null),Math.max(0,pair.expiresAt-Date.now())); return () => window.clearTimeout(timer) }, [pair])
-  useEffect(() => { if (!state?.account.loggedIn || state.account.stale || schemaError || state.server.state !== 'disponible') setPair(null) }, [state?.account.loggedIn,state?.account.stale,state?.server.state,schemaError])
+  useEffect(() => { if (!state?.account.loggedIn || state.account.stale || schemaError || state.server.state !== 'disponible') setPairDialog(false) }, [state?.account.loggedIn,state?.account.stale,state?.server.state,schemaError])
   const connect = () => { setCopyMessage(''); setCode(''); void act(provider,'login',() => api(`${root}/account/login`,{method:'POST'})) }
   const submitCode = async (event: FormEvent) => {
     event.preventDefault()
@@ -32,7 +34,8 @@ export function ProviderCard({provider, state, schemaError, actionError, busy, a
     {state && <>
       {(state.server.state === 'caido' || state.server.state === 'incompatible') && <div className="provider-alert" role="alert"><b>{state.server.state === 'incompatible' ? 'El servidor usa un formato incompatible' : 'El servidor se ha detenido inesperadamente'}</b><p>{state.server.detail}</p>{state.server.lastError && <p className="error-detail">{state.server.lastError}</p>}<button className="btn small" onClick={onLog}>Ver registro</button></div>}
       {state.server.state !== 'caido' && state.server.state !== 'incompatible' && <p className="server-detail">{state.server.detail}</p>}
-      {state.server.remoteControl && <p className={state.server.remoteControl === 'errored' ? 'inline-error' : 'hint'} role={state.server.remoteControl === 'errored' ? 'alert' : undefined}>{{disabled:'Acceso remoto desactivado',connecting:'Acceso remoto conectando…',connected:'Acceso remoto conectado',errored:'El acceso remoto ha fallado. Consulta el registro.'}[state.server.remoteControl]}</p>}
+      {provider === 'codex' && state.account.loggedIn && state.server.remoteControl === 'connected' && <p className="hint">El relay está disponible; eso no confirma que tu cliente esté emparejado ni que el servidor aparezca en su lista.</p>}
+      {relay && <p className={relay.error ? 'inline-error' : 'hint'} role={relay.error ? 'alert' : undefined}>{relay.text}</p>}
     </>}
     <div className="actions server-actions">
       {(!state || workerUnavailable || state.server.state === 'detenido' || state.server.state === 'caido') ? <button className="btn" disabled={!!busy} onClick={() => void act(provider,'start',() => api(`${root}/server/start`,{method:'POST'}),'Inicio solicitado')}>{busy === 'start' ? 'Iniciando…' : `Iniciar ${provider === 'claude' ? 'Claude' : 'Codex'}`}</button> : <button className="btn" disabled={!!busy || !!schemaError} onClick={() => void act(provider,'stop',() => api(`${root}/server/stop`,{method:'POST'}),'Parada solicitada')}>Parar {provider === 'claude' ? 'Claude' : 'Codex'}</button>}
@@ -55,13 +58,13 @@ export function ProviderCard({provider, state, schemaError, actionError, busy, a
       <p className="hint">{provider === 'codex' ? 'El código de dispositivo se introduce en OpenAI. Las credenciales se guardan en este servidor.' : 'El código de autorización se envía sólo a este servidor. Cada agente conserva sus propias credenciales.'}</p>
       {provider === 'claude' && <button className="btn text" disabled={!!busy || unavailable} onClick={onAccountTerminal}>{busy === 'terminal-account' ? 'Abriendo terminal…' : 'Terminal de la cuenta de Claude'}</button>}
     </div>
-    {provider === 'codex' && <><button className="btn text" disabled={!!busy || unavailable || !state?.account.loggedIn || state?.server.state !== 'disponible'} onClick={() => void act(provider,'pair',async () => {
-      const result = await api<{manualPairingCode:string;expiresAt:number}>(`${root}/pair`,{method:'POST'})
-      if (!result || typeof result.manualPairingCode !== 'string' || typeof result.expiresAt !== 'number' || !Number.isFinite(result.expiresAt)) throw new Error('Esta versión no devolvió un código de conexión válido.')
-      const expiresAt = result.expiresAt < 1e12 ? result.expiresAt*1000 : result.expiresAt
-      if (expiresAt <= Date.now()) throw new Error('El código de conexión ha caducado. Solicita otro.')
-      setPair({...result,expiresAt})
-    })}>{busy === 'pair' ? 'Preparando código…' : 'Conectar Codex desde otro dispositivo'}</button>{pair && <div className="pair-code" role="status"><p>Código de conexión de Codex</p><code>{pair.manualPairingCode}</code><p className="hint">Caduca a las {new Date(pair.expiresAt).toLocaleTimeString('es-ES')}. Trátalo como un código privado.</p><button className="btn small" onClick={() => setPair(null)}>Ocultar código</button></div>}</>}
+    {provider === 'codex' && <>
+      <button className="btn text" disabled={!!busy || unavailable || !state?.account.loggedIn || state?.server.state !== 'disponible'} onClick={() => setPairDialog(true)}>Emparejar otro dispositivo (experimental)</button>
+      {pairDialog && <PairingDialog onClose={() => setPairDialog(false)} onCancelAttempt={async attemptId => {
+        const ok=await act('codex','pair-cancel',() => api('providers/codex/pair/cancel',{method:'POST',body:{attemptId}}))
+        if(!ok)throw new Error('No se pudo olvidar el intento de emparejamiento.')
+      }} />}
+    </>}
     {provider === 'claude' && typeof state?.details?.autoRescue === 'boolean' && <label className="recovery-setting"><input type="checkbox" checked={state.details.autoRescue} disabled={!!busy || unavailable} onChange={event => void act(provider,'autoRescue',() => api(`${root}/settings`,{method:'PATCH',body:{autoRescue:event.target.checked}}),'Recuperación automática actualizada')} />Recuperar conversaciones tras un apagado inesperado</label>}
     {state && (state.server.restarts > 0 || (state.worker?.restarts ?? 0) > 0) && <p className="hint">Reinicios del servidor: {state.server.restarts}{state.worker ? `; del gestor: ${state.worker.restarts}` : ''}. Consulta el registro para ver qué ocurrió.</p>}
   </section>

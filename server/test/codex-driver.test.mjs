@@ -23,6 +23,8 @@ const service = {
   startLogin:()=>({state:'pending'}),cancelLogin:()=>({state:'idle'}),
   startServer:async()=>lifecycle.push('start'),stopServer:async()=>lifecycle.push('stop'),restartServer:async()=>lifecycle.push('restart'),
   pair:async()=>({manualPairingCode:'TEST-PAIR',expiresAt:1900000000}),
+  pairStatus:async attemptId=>({state:attemptId==='11111111-1111-4111-8111-111111111111'?'pending':'idle'}),
+  cancelPairing:attemptId=>({state:'idle'}),
   revokeTerminal:async id=>lifecycle.push(`revoke-${id}`),
   removeProject:async id=>q.deleteProject(id),
   terminal:async id=>({window:`p-${id}`}),
@@ -46,6 +48,8 @@ test('Codex driver keeps incompatible state visible and routes only its own life
   await driver.request('server.restart',{});
   assert.deepEqual(await driver.request('login.start',{}),{state:'pending'});
   assert.deepEqual(await driver.request('remote.pair',{}),{manualPairingCode:'TEST-PAIR',expiresAt:1900000000});
+  assert.deepEqual(await driver.request('remote.pair.status',{attemptId:'11111111-1111-4111-8111-111111111111'}),{state:'pending'});
+  assert.deepEqual(await driver.request('remote.pair.cancel',{attemptId:'11111111-1111-4111-8111-111111111111'}),{state:'idle'});
   await assert.rejects(driver.request('claude.login',{}),/no admitida/);
   assert.deepEqual(lifecycle,['boot','restart']);
   process.env.RC_CODEX_INTEGRITY_ERROR = '1';

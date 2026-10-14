@@ -5,9 +5,10 @@ import {promisify} from 'node:util'
 import {config} from './config.js'
 import {q} from './db.js'
 import {DeviceLogin, killOwnProcess} from './login.js'
-import {RpcClient, CodexFailure, validateInitialize, validateAccount, validateRemoteStatus, validatePairing, type Account, type RemoteStatus} from './protocol.js'
+import {RpcClient, CodexFailure, validateInitialize, validateAccount, validateRemoteStatus, type Account, type RemoteStatus} from './protocol.js'
 import {projectPath} from './projects.js'
 import * as tmux from './tmux.js'
+import {PairingService} from './pairing.js'
 
 const run = promisify(execFile)
 type ServerState = {state:'iniciando'|'disponible'|'caido'|'incompatible'|'detenido'; detail:string; restarts:number; experimental:true; lastError?:string; remoteControl?:RemoteStatus}
@@ -21,6 +22,8 @@ export class Manager {
     onEvent:message => q.event('info',message),
     onComplete:() => { this.restartServer().catch(() => {/* El estado ya contiene el fallo. */}) },
   })
+  private pairing = new PairingService({rpc:()=>this.rpc,available:()=>this.server.state==='disponible'&&this.account.loggedIn,
+    event:(level,message)=>q.event(level,message),incompatible:error=>this.failed(error,this.generation)})
   private child?: ChildProcess
   private rpc?: RpcClient
   private generation = 0
@@ -68,6 +71,7 @@ export class Manager {
   }
 
   stopServer() {
+    this.pairing.clear()
     q.setMeta('serverDesired','0')
     return this.serial(async () => {
       await this.stopOwnServer()
@@ -78,6 +82,7 @@ export class Manager {
   }
 
   restartServer() {
+    this.pairing.clear()
     q.setMeta('serverDesired','1')
     return this.serial(async () => {
       await this.stopOwnServer()
@@ -87,6 +92,7 @@ export class Manager {
   }
 
   private async stopOwnServer() {
+    this.pairing.clear()
     ++this.generation
     clearTimeout(this.retry)
     this.rpc?.close()
@@ -158,7 +164,7 @@ export class Manager {
 
   private describe() {
     if (!this.account.loggedIn) this.server.detail = 'API local disponible. Inicia sesión con el flujo de dispositivo para conectar Remote Control.'
-    else if (this.server.remoteControl === 'connected') this.server.detail = 'API local y Remote Control conectados. Puedes generar un código de emparejamiento.'
+    else if (this.server.remoteControl === 'connected') this.server.detail = 'API local disponible y relay de Codex conectado. Ese estado no confirma por sí mismo el emparejamiento con un cliente.'
     else if (this.server.remoteControl === 'errored') this.server.detail = 'API local disponible, pero Remote Control ha fallado. Reinicia el servidor para reintentar.'
     else if (this.server.remoteControl === 'disabled') this.server.detail = 'API local disponible; Remote Control está desactivado.'
     else this.server.detail = 'API local disponible. Remote Control está conectando…'
@@ -173,6 +179,7 @@ export class Manager {
       const account = validateAccount(await rpc.call('account/read',{refreshToken:false}))
       const remote = validateRemoteStatus(await rpc.call('remoteControl/status/read',{}))
       if (generation !== this.generation) return
+      if (!account.loggedIn) this.pairing.clear()
       this.account = account
       this.server.remoteControl = remote
       if (this.server.state === 'disponible') this.describe()
@@ -184,6 +191,7 @@ export class Manager {
 
   private failed(error: CodexFailure,generation: number) {
     if (generation !== this.generation || this.closing) return
+    this.pairing.clear()
     ++this.generation // Ignora el exit que causa nuestra parada y callbacks antiguos.
     this.rpc?.close()
     this.rpc = undefined
@@ -202,21 +210,15 @@ export class Manager {
   }
 
   startLogin() {
+    this.pairing.clear()
     if (this.server.state === 'incompatible') throw new Error('Corrige la incompatibilidad de Codex antes de iniciar sesión')
     return this.login.start()
   }
-  cancelLogin() { return this.login.cancel() }
+  cancelLogin() { this.pairing.clear(); return this.login.cancel() }
 
-  async pair() {
-    if (!this.rpc || this.server.state !== 'disponible' || !this.account.loggedIn) throw new Error('Inicia sesión y espera a que el app-server esté disponible')
-    const rpc = this.rpc
-    const generation = this.generation
-    try { return validatePairing(await rpc.call('remoteControl/pairing/start',{manualCode:true})) }
-    catch (error) {
-      if (error instanceof CodexFailure && error.kind === 'protocol') this.failed(error,generation)
-      throw new Error(error instanceof CodexFailure ? error.message : 'No se pudo generar el código de emparejamiento')
-    }
-  }
+  pair() { return this.pairing.start() }
+  pairStatus(attemptId:string) { return this.pairing.status(attemptId) }
+  cancelPairing(attemptId:string) { return this.pairing.cancel(attemptId) }
 
   async terminal(id: number) {
     if (this.server.state === 'incompatible') throw new Error('Corrige la incompatibilidad de Codex antes de abrir un terminal')
@@ -246,6 +248,7 @@ export class Manager {
   async removeProject(id: number) { await this.revokeTerminal(id); q.deleteProject(id) }
 
   async shutdown() {
+    this.pairing.clear()
     this.closing = true
     clearInterval(this.monitor)
     this.login.cancel(false)

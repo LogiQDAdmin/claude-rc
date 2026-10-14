@@ -43,11 +43,16 @@ export function validateRemoteStatus(value: unknown): RemoteStatus {
 }
 
 export function validatePairing(value: unknown) {
-  if (!isObject(value) || typeof value.pairingCode !== 'string' || !(value.manualPairingCode === null || typeof value.manualPairingCode === 'string') ||
-      typeof value.environmentId !== 'string' || typeof value.expiresAt !== 'number' || !Number.isSafeInteger(value.expiresAt)) throw incompatible()
-  if (value.manualPairingCode === null) throw new CodexFailure('rpc','El servidor no entregó un código manual de emparejamiento; vuelve a intentarlo')
-  if (value.manualPairingCode.length < 1 || value.manualPairingCode.length > 64 || !/^[A-Z0-9 -]+$/i.test(value.manualPairingCode)) throw incompatible()
-  return {manualPairingCode: value.manualPairingCode, expiresAt: value.expiresAt}
+  if (!isObject(value) || typeof value.pairingCode !== 'string' || value.pairingCode.length<1 || value.pairingCode.length>4096 || /[\u0000-\u0020\u007f]/.test(value.pairingCode) ||
+      !(value.manualPairingCode===null || typeof value.manualPairingCode==='string') || typeof value.environmentId!=='string' ||
+      typeof value.expiresAt!=='number' || !Number.isSafeInteger(value.expiresAt) || value.expiresAt<=0 || !Number.isSafeInteger(value.expiresAt*1000)) throw incompatible()
+  if (value.manualPairingCode!==null && (value.manualPairingCode.length<1 || value.manualPairingCode.length>64 || !/^[A-Z0-9 -]+$/i.test(value.manualPairingCode))) throw incompatible()
+  return {pairingCode:value.pairingCode,manualPairingCode:value.manualPairingCode,expiresAt:value.expiresAt}
+}
+
+export function validatePairingStatus(value:unknown):boolean {
+  if (!isObject(value) || typeof value.claimed!=='boolean') throw incompatible()
+  return value.claimed
 }
 
 type Waiting = {resolve: (value: unknown) => void; reject: (error: CodexFailure) => void; timer: NodeJS.Timeout}

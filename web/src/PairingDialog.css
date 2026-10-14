@@ -1,0 +1,14 @@
+.pairing-dialog { width:min(600px,calc(100vw - 32px)) }
+.pairing-dialog-content { padding:25px; display:flex; flex-direction:column; gap:18px }
+.pairing-dialog-content h2 { margin-bottom:6px }
+.pairing-compatibility { padding:12px 14px; background:#fff0d0; border:1px solid #dfc185; border-radius:5px; color:#765010; font-size:13px }
+.pairing-compatibility a { display:inline-block; margin-top:8px; font-weight:600 }
+.pairing-steps { margin:0; padding-left:22px; font-size:14px; display:flex; flex-direction:column; gap:12px }
+.manual-entry-check { display:flex; align-items:flex-start; gap:9px; font-size:13px; cursor:pointer }
+.manual-entry-check input { margin-top:3px }
+.pairing-progress { display:flex; flex-direction:column; gap:8px; padding:13px 15px; background:#edf4f6; border-left:3px solid #8ca9b8; border-radius:4px; font-size:13px; overflow-wrap:anywhere }
+.pairing-progress h3 { font-size:15px }
+.pairing-claimed { background:#d8ede5; border-color:#006353 }
+.pairing-error, .pairing-expired { background:#fff0f0; border-color:#a32d35 }
+@media(max-width:500px) { .pairing-dialog-content { padding:20px 17px; gap:15px }; .pairing-steps { font-size:13px }; .pairing-compatibility { padding:10px 12px } }
+.pairing-progress .device-code code { white-space:pre-wrap }

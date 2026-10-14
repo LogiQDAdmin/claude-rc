@@ -93,8 +93,20 @@ export function messageOf(error: unknown) { return error instanceof Error ? erro
 export const SERVER_LABEL: Record<ServerState, string> = {iniciando:'Iniciando', disponible:'Disponible', caido:'Detenido inesperadamente', incompatible:'Formato incompatible', detenido:'Detenido'}
 export const LABEL: Record<string, string> = {detenida:'Detenida', iniciando:'Iniciando', disponible:'Disponible', trabajando:'Trabajando', esperando:'Esperando respuesta', recuperando:'Recuperando', atencion:'Requiere atención', reposo:'En reposo', detenido:'Detenido', caido:'Caído', incompatible:'Incompatible'}
 export function loginUrl(value: string | undefined, provider: Provider) {
-  if (!value) return undefined
-  try { const url = new URL(value); const hosts = provider === 'codex' ? ['auth.openai.com','chatgpt.com','openai.com'] : ['claude.ai','console.anthropic.com','platform.claude.com','auth.anthropic.com','anthropic.com']; if (url.protocol === 'https:' && hosts.includes(url.hostname)) return url.href } catch { /* Visible account error instead of opening an unknown link. */ }
+  if (!value || /[\u0000-\u0020\u007f\\]/.test(value)) return undefined
+  try {
+    const authority = value.match(/^https:\/\/([^/?#]*)/i)?.[1]
+    const url = new URL(value)
+    if (authority === undefined || authority.includes('@') || url.protocol !== 'https:' || url.username || url.password || url.port) return undefined
+    // Claude Code 2.1.294 uses this exact endpoint. Do not allow unrelated
+    // claude.com pages or rebuild its opaque OAuth query parameters.
+    if (provider === 'claude' && url.hostname === 'claude.com')
+      return url.pathname === '/cai/oauth/authorize' ? url.href : undefined
+    const hosts = provider === 'codex'
+      ? ['auth.openai.com','chatgpt.com','openai.com']
+      : ['claude.ai','console.anthropic.com','platform.claude.com','auth.anthropic.com','anthropic.com']
+    if (hosts.includes(url.hostname)) return url.href
+  } catch { /* Visible account error instead of opening an unknown link. */ }
   return undefined
 }
 export function conversationUrl(value: string) { try { const url = new URL(value); if (url.protocol === 'https:') return url.href } catch {} return undefined }

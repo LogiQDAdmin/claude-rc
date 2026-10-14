@@ -1,6 +1,6 @@
 {
   "name": "agent-rc-server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Remote Control — Claude y Codex con procesos independientes y versiones fijadas",

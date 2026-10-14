@@ -98,3 +98,25 @@ test('password and missing workers never disable public health; unauthorized WS 
     assert.equal(status,403)
   } finally { await s.close() }
 })
+
+test('pair status/cancel use only local correlation in POST and never accept native codes or generate on reads',async()=> {
+  const s=await setup(),attemptId='11111111-1111-4111-8111-111111111111'
+  try {
+    await s.request('/api/state');await s.request('/api/providers/codex/pair/status')
+    assert.equal(s.calls.length,0)
+    assert.equal((await s.request('/api/providers/codex/pair','POST',{})).status,200)
+    assert.deepEqual(s.calls.at(-1),{p:'codex',action:'remote.pair',args:{}})
+    assert.equal((await s.request('/api/providers/codex/pair/status','POST',{attemptId})).status,200)
+    assert.deepEqual(s.calls.at(-1),{p:'codex',action:'remote.pair.status',args:{attemptId}})
+    assert.equal((await s.request('/api/providers/codex/pair/cancel','POST',{attemptId})).status,200)
+    assert.deepEqual(s.calls.at(-1),{p:'codex',action:'remote.pair.cancel',args:{attemptId}})
+    const before=s.calls.length
+    for(const value of [{},{attemptId,manualPairingCode:'TEST-PAIR'},{pairingCode:'OPAQUE-TEST-ONLY'},{attemptId:'not-a-local-uuid'}])
+      assert.equal((await s.request('/api/providers/codex/pair/status','POST',value)).status,400)
+    assert.equal((await s.request('/api/providers/codex/pair/status?manualPairingCode=TEST-PAIR','POST',{attemptId})).status,400)
+    assert.equal((await s.request('/api/providers/codex/pair/unknown','POST',{attemptId})).status,404)
+    assert.equal(s.calls.length,before)
+    assert.equal((await s.request('/healthz')).status,200)
+    assert.equal(s.states.claude.server.state,'disponible')
+  } finally { await s.close() }
+})

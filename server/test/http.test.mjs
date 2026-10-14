@@ -71,6 +71,19 @@ test('no login runs on page/state/folders; CSRF, root escape and unknown provide
     assert.deepEqual(s.calls.at(-1),{p:'codex',action:'login.start',args:{}})
   } finally { await s.close() }
 })
+test('numeric legacy names keep their action URLs and new provider routes use catalog IDs',async()=>{
+  const s=await setup()
+  try {
+    const added=await s.request('/api/projects','POST',{name:'123',dir:path.join(s.projects,'numbers'),create:true,trust:false})
+    assert.equal(added.status,201)
+    const id=added.value.unifiedProjects[0].id
+    assert.notEqual(id,123)
+    assert.equal((await s.request('/api/projects/123/start','POST',{})).status,200)
+    assert.equal(s.calls.at(-1).args.name,'123')
+    assert.equal((await s.request(`/api/projects/${id}/providers/claude/stop`,'POST',{})).status,200)
+    assert.equal(s.calls.at(-1).args.name,'123')
+  } finally { await s.close() }
+})
 test('password and missing workers never disable public health; unauthorized WS rejected before PTY',async()=>{
   const s=await setup('only-fixture-password')
   try {

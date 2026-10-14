@@ -167,7 +167,10 @@ export function createPanel(catalog:Catalog,supervisor:Supervisor,options:PanelO
         return json(res,201,state())
       }
       const legacy=parts.length<3||parts[2]!=='providers'
-      const p=project(parts[1],legacy&&!/^\d+$/.test(parts[1]))
+      // Legacy action URLs carry a name, which can legally be all digits.
+      // Provider URLs and the new catalog deletion route use numeric IDs.
+      const legacyAction=method==='POST'&&parts.length===3&&parts[2]!=='providers'
+      const p=project(parts[1],legacyAction||(legacy&&!/^\d+$/.test(parts[1])))
       if (method==='DELETE'&&parts.length===2) { for (const b of p.bindings) await removeBinding(p,b.provider); catalog.remove(p.id); return json(res,200,state()) }
       if (parts[2]==='providers') {
         if (method==='POST'&&parts.length===3) { const b=await body(req); await addBinding(p,provider(b.provider),b); return json(res,201,state()) }
